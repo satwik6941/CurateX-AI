@@ -18,8 +18,10 @@ html {
 
 body {
     font-family: 'Poppins', sans-serif;
-    background: var(--bg-primary);
-    color: var(--text-primary);
+    margin: 0;
+    padding: 0;
+    background: linear-gradient(to right, #0d1a2f, #1b2e4f); /* Dark blue gradient matching image */
+    color: #e0e0e0;
     line-height: 1.6;
     transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
     min-height: 100vh;
@@ -1110,4 +1112,164 @@ p {
     max-width: 900px;
     margin: 0 auto 50px;
     opacity: 0.9;
+}
+
+/* Onboarding Page Styles */
+.onboarding-section {
+    padding: 4rem 0;
+    min-height: calc(100vh - 80px);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+}
+
+.onboarding-form {
+    max-width: 600px;
+    margin: 0 auto;
+    padding: 3rem;
+    background: #1a2e4d; /* Solid dark blue for the form background, matching image */
+    border-radius: 15px;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4); /* Darker shadow for depth */
+    border: 1px solid rgba(255, 255, 255, 0.05); /* Very subtle white border */
+}
+
+.onboarding-section .section-title {
+    color: #ffffff;
+    font-weight: 700; /* Make title bolder */
+    text-align: center;
+    margin-bottom: 2.5rem;
+    font-size: 2.2rem;
+}
+
+.form-group {
+    margin-bottom: 1.5rem;
+}
+
+.form-group label {
+    display: block;
+    margin-bottom: 0.5rem;
+    font-weight: 600;
+    color: #ffffff; /* White color for labels */
+    text-align: center; /* Center the labels */
+}
+
+.form-group input {
+    max-width: 800px; /* Further increased max-width for larger input boxes */
+    padding: 1.2rem 1.5rem; /* Increased padding for a much bigger appearance */
+    border: 1px solid #ccc; /* Light grey border */
+    border-radius: 8px;
+    font-size: 1.2rem; /* Increased font size for text inside */
+    background-color: #ffffff; /* Opaque white background for inputs */
+    color: #333333; /* Dark text for inputs */
+    transition: border-color 0.3s ease, background-color 0.3s ease;
+    text-indent: 5px; /* Slight indent for placeholder text */
+    margin: 0 auto; /* Center the input field */
+    display: block; /* Ensure it behaves as a block for margin auto */
+}
+
+.form-group input::placeholder {
+    color: #888888; /* Darker placeholder color */
+    font-size: 1rem; /* Ensure consistent placeholder font size */
+}
+
+.button-group {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.7rem;
+    margin-top: 0.5rem;
+    justify-content: center; /* Center the buttons within the group */
+}
+
+.category-btn, .summary-btn {
+    padding: 0.6rem 1.2rem;
+    border: 1px solid #1a2e4d; /* Solid dark blue border for unselected */
+    border-radius: 25px;
+    background: #1a2e4d; /* Solid dark blue background for unselected, matching form */
+    color: #ffffff; /* White text for unselected */
+    cursor: pointer;
+    transition: all 0.3s ease-in-out; /* Smooth transition for all properties */
+    font-size: 0.95rem;
+    font-weight: 500;
+}
+
+.category-btn:hover, .summary-btn:hover {
+    background: #2a4160; /* Slightly lighter dark blue on hover */
+    border-color: #2a4160; 
+    color: #ffffff;
+    transform: translateY(-2px); /* Lift button on hover */
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2); /* Subtle shadow on hover */
+}
+
+.category-btn:active, .summary-btn:active {
+    transform: translateY(0); /* Press down effect */
+    box-shadow: 0 2px 5px rgba(0, 0, 0, 0.3); /* Smaller shadow when pressed */
+}
+
+.category-btn.selected, .summary-btn.selected {
+    background: #007bff; /* Blue background when selected */
+    color: white;
+    border-color: #007bff;
+    box-shadow: 0 4px 10px rgba(0, 123, 255, 0.3);
+}
+
+.save-btn {
+    width: 100%;
+    margin-top: 1.5rem;
+    padding: 1rem;
+    font-size: 1.15rem;
+    font-weight: 600;
+    background: linear-gradient(to right, #007bff, #0056b3); /* Blue gradient for save button */
+    border: none;
+    border-radius: 8px;
+    color: white;
+    cursor: pointer;
+    transition: all 0.3s ease-in-out; /* Smooth transition for all properties */
+}
+
+.save-btn:hover {
+    background: linear-gradient(to right, #0056b3, #007bff);
+    transform: translateY(-2px); /* Lift button on hover */
+    box-shadow: 0 6px 15px rgba(0, 123, 255, 0.4); /* Enhanced shadow on hover */
+}
+
+.save-btn:active {
+    transform: translateY(0); /* Press down effect */
+    box-shadow: 0 3px 8px rgba(0, 123, 255, 0.5); /* Smaller shadow when pressed */
+}
+
+.curating-message {
+    text-align: center;
+    padding: 2.5rem;
+    background: #1a2e4d; /* Consistent dark blue background with form */
+    border-radius: 15px;
+    margin-top: 2rem;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.loading-animation {
+    font-size: 2.5rem;
+    color: #007bff;
+    margin-bottom: 1rem;
+}
+
+.curating-message h3 {
+    color: #ffffff; /* White color for message heading */
+    margin-bottom: 0.7rem;
+    font-size: 1.6rem;
+}
+
+.curating-message p {
+    color: #c0c0c0; /* Light gray for message paragraph */
+    font-size: 1.1rem;
+}
+
+/* Animation for the curating message */
+@keyframes fadeIn {
+    from { opacity: 0; transform: translateY(20px); }
+    to { opacity: 1; transform: translateY(0); }
+}
+
+.curating-message {
+    animation: fadeIn 0.5s ease-out;
 }
