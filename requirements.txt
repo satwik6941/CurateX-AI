@@ -1,2 +1,5 @@
-GoogleNews==1.6.13
-pandas==2.0.3
+GoogleNews
+newspaper3k
+google-genai
+requests
+dotenv
