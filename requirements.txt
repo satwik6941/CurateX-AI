@@ -3,3 +3,9 @@ newspaper3k
 google-genai
 requests
 dotenv
+groq
+pytz
+logging
+asyncio
+python-telegram-bot
+requests
