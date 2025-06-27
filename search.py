@@ -14,7 +14,7 @@ user_query = input("What do you want to search for?: ")
 response = client.models.generate_content(
     model="gemini-2.0-flash",
     config=types.GenerateContentConfig(
-        system_instruction="You are an expert in providing news articles. Based on the user query, create a list of top 20 keywords that are highly relevant to the query. Return only the keywords, one per line, without numbering or additional text.",),
+        system_instruction="You are an expert in providing news articles. Based on the user query, create a list of top 20 keywords that are highly relevant to the query.The keywords can contain more than one word also to keep the users context. Return only the keywords, one per line, without numbering or additional text.",),
     contents=user_query,
 )
 
