@@ -16,21 +16,17 @@ news_number = int(input("How many news articles do you want to fetch? (default i
 filepath = pathlib.Path('news_results.txt')
 
 def extract_detailed_summary(url):
-    """Extract detailed summary from article URL using newspaper3k"""
+    """Extract summary from article URL using newspaper3k"""
     try:
         article = Article(url)
         article.download()
         article.parse()
         article.nlp()
         
-        return {
-            'summary': article.summary,
-        }
+        return article.summary or "Summary not available"
     except Exception as e:
-        print(f"Error extracting detailed content from {url}: {e}")
-        return {
-            'summary': "Could not extract detailed summary from this article.",
-        }
+        print(f"Error extracting summary from {url}: {e}")
+        return "Could not extract summary from this article."
 
 prompt = f'''You are an expert news curator and analyst with deep expertise in content filtering and ranking. Your task is to analyze the provided news articles and create a curated selection of the highest quality, most relevant content.
 
@@ -72,16 +68,33 @@ If necessary, use Google Search to find additional high-quality news articles th
 5. For each selected article, I will extract detailed summaries using the article URLs
 
 **OUTPUT FORMAT:**
-Provide ONLY the selected article URLs and titles in this exact format:
+You MUST return exactly {news_number} articles in this EXACT format:
 
 SELECTED_ARTICLES:
-Article X
-Title: Title of the article
-Description / Summary: Description or summary of the article (if not available, fetch it using google search)
-URL: URL of the article
-Published At: Date and time of the publication in IST(Indian Standard Time) 
-Source:  Name of the source or website
-...and so on for {news_number} articles
+Article 1
+Title: [Complete article title]
+Description / Summary: [Brief description or summary of the article - keep it concise]
+URL: [Complete URL of the article]
+Published At: [Date and time in IST format if available, otherwise "Date not available"]
+Source: [Name of the source/website]
+
+Article 2
+Title: [Complete article title]
+Description / Summary: [Brief description or summary of the article - keep it concise]
+URL: [Complete URL of the article]
+Published At: [Date and time in IST format if available, otherwise "Date not available"]
+Source: [Name of the source/website]
+
+...continue for all {news_number} articles
+
+**CRITICAL FORMATTING RULES:**
+- Start with "SELECTED_ARTICLES:" exactly as shown
+- Each article must start with "Article X" (where X is the number)
+- Follow the exact field format: "Title:", "Description / Summary:", "URL:", "Published At:", "Source:"
+- Leave a blank line between articles
+- Include exactly {news_number} articles
+- If summary/description is not available, write "Summary not available"
+- For dates, convert to IST if possible, otherwise write "Date not available"
 
 **IMPORTANT GUIDELINES:**
 - Be extremely selective - quality over quantity
@@ -140,96 +153,123 @@ try:
     # Get curated article selection
     response = generate_with_retry()
     
+    # Debug: Print the raw response to see what LLM returned
+    print("🔍 Raw LLM Response:")
+    print("-" * 50)
+    print(response.text)
+    print("-" * 50)
+    
     # Parse the selected articles from response
     selected_articles = []
     lines = response.text.split('\n')
     
-    for line in lines:
-        if '|' in line and ('http' in line or 'www' in line):
-            try:
-                parts = line.split('|')
-                if len(parts) >= 2:
-                    title = parts[0].strip()
-                    url = parts[1].strip()
-                    # Remove numbering if present
-                    if title.startswith(tuple('123456789')):
-                        title = '. '.join(title.split('. ')[1:])
-                    selected_articles.append({'title': title, 'url': url})
-            except:
-                continue
+    # Find the SELECTED_ARTICLES section and parse the structured format
+    found_articles_section = False
+    current_article = {}
     
-    print(f"✅ Selected {len(selected_articles)} articles for detailed analysis")
+    for line in lines:
+        line = line.strip()
+        
+        if line == "SELECTED_ARTICLES:":
+            found_articles_section = True
+            continue
+            
+        if found_articles_section:
+            if line.startswith("Article "):
+                # If we have a complete article, save it
+                if current_article and 'title' in current_article and 'url' in current_article:
+                    selected_articles.append(current_article)
+                # Start a new article
+                current_article = {}
+                
+            elif line.startswith("Title:"):
+                current_article['title'] = line.replace("Title:", "").strip()
+                
+            elif line.startswith("Description / Summary:"):
+                current_article['llm_summary'] = line.replace("Description / Summary:", "").strip()
+                
+            elif line.startswith("URL:"):
+                current_article['url'] = line.replace("URL:", "").strip()
+                
+            elif line.startswith("Published At:"):
+                current_article['published_at'] = line.replace("Published At:", "").strip()
+                
+            elif line.startswith("Source:"):
+                current_article['source'] = line.replace("Source:", "").strip()
+    
+    # Don't forget the last article
+    if current_article and 'title' in current_article and 'url' in current_article:
+        selected_articles.append(current_article)
+    
+    print(f"Parsed {len(selected_articles)} articles from LLM response")
+    
+    # Now extract detailed summaries using newspaper3k for each article
+    for idx, article in enumerate(selected_articles):
+        print(f"Extracting newspaper3k summary for article {idx+1}/{len(selected_articles)}: {article['title'][:50]}...")
+        article['newspaper_summary'] = extract_detailed_summary(article['url'])
+        time.sleep(0.5)  # Small delay to avoid overwhelming servers
+    
+    print(f"Selected {len(selected_articles)} articles for detailed analysis")
     
     # Save the curated results with detailed summaries
     output_filename = f"curated_news_{news_number}_articles.txt"
     with open(output_filename, "w", encoding="utf-8") as f:
         f.write("="*80 + "\n")
-        f.write("EXPERT NEWS CURATION RESULTS (Enhanced with Detailed Summaries)\n")
+        f.write("EXPERT NEWS CURATION RESULTS\n")
         f.write("="*80 + "\n")
         f.write(f"Original Query: {user_query}\n")
         f.write(f"Requested Articles: {news_number}\n")
         f.write(f"Selected Articles: {len(selected_articles)}\n")
-        f.write(f"Research Sources: Original Document + Google Search + Article Analysis\n")
+        f.write(f"Research Sources: Original Document + Google Search + Newspaper3k Analysis\n")
         f.write("="*80 + "\n\n")
         
-        f.write("🎯 CURATION METHODOLOGY\n")
+        f.write("CURATION METHODOLOGY\n")
         f.write("-" * 40 + "\n")
         f.write("Each article was selected based on relevance, quality, recency, source credibility, and uniqueness.\n")
-        f.write("Detailed summaries were extracted directly from article content using advanced text analysis.\n\n")
+        f.write("Summaries were extracted using newspaper3k for accurate content analysis.\n\n")
         
-        # Process each selected article with detailed summary
+        # Process each selected article
         for idx, article in enumerate(selected_articles, 1):
-            print(f"📖 Extracting detailed summary for article {idx}/{len(selected_articles)}: {article['title'][:50]}...")
-            
-            # Extract detailed summary
-            detailed_info = extract_detailed_summary(article['url'])
-            
             f.write(f"📰 ARTICLE {idx}\n")
             f.write("=" * 50 + "\n")
             f.write(f"🏆 RANK: {idx}/{len(selected_articles)}\n")
             f.write(f"📰 TITLE: {article['title']}\n")
             f.write(f"🔗 URL: {article['url']}\n")
             
-            if detailed_info['authors']:
-                f.write(f"✍️  AUTHORS: {', '.join(detailed_info['authors'])}\n")
+            if article.get('source'):
+                f.write(f"📰 SOURCE: {article['source']}\n")
             
-            if detailed_info['publish_date']:
-                f.write(f"📅 PUBLISHED: {detailed_info['publish_date']}\n")
+            if article.get('published_at'):
+                f.write(f"📅 PUBLISHED: {article['published_at']}\n")
             
-            if detailed_info['keywords']:
-                f.write(f"🔍 KEY TOPICS: {', '.join(detailed_info['keywords'])}\n")
-            
-            f.write("\n📋 DETAILED SUMMARY:\n")
+            f.write("\n📋 LLM SUMMARY:\n")
             f.write("-" * 30 + "\n")
-            f.write(f"{detailed_info['summary']}\n\n")
+            f.write(f"{article.get('llm_summary', 'No summary provided')}\n\n")
             
-            f.write("📄 ARTICLE EXCERPT:\n")
+            f.write("� NEWSPAPER3K SUMMARY:\n")
             f.write("-" * 30 + "\n")
-            f.write(f"{detailed_info['full_text']}\n\n")
+            f.write(f"{article.get('newspaper_summary', 'Could not extract summary')}\n\n")
             
             f.write("🎯 WHY THIS ARTICLE WAS SELECTED:\n")
             f.write("-" * 30 + "\n")
             f.write(f"This article was selected for its high relevance to '{user_query}', ")
-            f.write("comprehensive coverage, credible source, and unique insights that contribute to a well-rounded understanding of the topic.\n\n")
+            f.write("comprehensive coverage, credible source, and unique insights.\n\n")
             
             f.write("="*80 + "\n\n")
-            
-            # Add small delay to avoid overwhelming servers
-            time.sleep(0.5)
         
         f.write("🎯 CURATION SUMMARY\n")
         f.write("="*50 + "\n")
         f.write(f"Total articles analyzed: Multiple sources\n")
         f.write(f"Articles selected: {len(selected_articles)}\n")
         f.write(f"Selection criteria: Relevance (40%), Quality (25%), Recency (20%), Credibility (10%), Uniqueness (5%)\n")
-        f.write(f"Enhanced with: Google Search + Detailed Article Analysis\n")
+        f.write(f"Enhanced with: Google Search + Newspaper3k Summary Extraction\n")
         f.write("="*80 + "\n")
 
-    print(f"\n✅ Expert curation completed with detailed summaries!")
-    print(f"📄 Results saved to: {output_filename}")
-    print(f"🎯 Processed {len(selected_articles)} curated articles with detailed analysis")
-    print(f"🔍 Enhanced with Google Search and full article content extraction")
+    print(f"\n Expert curation completed!")
+    print(f"Results saved to: {output_filename}")
+    print(f"Processed {len(selected_articles)} curated articles")
+    print(f"Enhanced with Google Search and Newspaper3k summary extraction")
 
 except Exception as e:
-    print(f"❌ Failed to complete curation: {e}")
-    print("💡 Try again in a few minutes when the model is less busy.")
+    print(f"Failed to complete curation: {e}")
+    print("Try again in a few minutes when the model is less busy.")
