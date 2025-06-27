@@ -119,20 +119,14 @@ config = types.GenerateContentConfig(
     tools=[grounding_tool]
 )
 
-def generate_with_retry(max_retries=3):
+def generate_with_retry(max_retries=3, model="gemini-2.0-flash", contents=None, config=None):
     for attempt in range(max_retries):
         try:
             print(f"🔄 Generating curated selection... (Attempt {attempt + 1})")
             
             response = client.models.generate_content(
-                model="gemini-2.0-flash",
-                contents=[
-                    types.Part.from_bytes(
-                        data=filepath.read_bytes(),
-                        mime_type='text/plain',
-                    ),
-                    prompt
-                ],
+                model=model,
+                contents=contents,
                 config=config
             )
             return response
@@ -151,7 +145,16 @@ def generate_with_retry(max_retries=3):
 
 try:
     # Get curated article selection
-    response = generate_with_retry()
+    response = generate_with_retry(
+        contents=[
+            types.Part.from_bytes(
+                data=filepath.read_bytes(),
+                mime_type='text/plain',
+            ),
+            prompt
+        ],
+        config=config
+    )
     
     # Debug: Print the raw response to see what LLM returned
     print("🔍 Raw LLM Response:")
@@ -269,6 +272,48 @@ try:
     print(f"Results saved to: {output_filename}")
     print(f"Processed {len(selected_articles)} curated articles")
     print(f"Enhanced with Google Search and Newspaper3k summary extraction")
+    
+    prompt_1 = '''
+You are a professional news article formatter and content curator. Your task is to extract and format news articles from raw text content to a format of a message.  
+
+For each article you identify, you must:
+1. Create a concise 2-3 sentence summary capturing the key points and main story
+2. Identify and extract the source publication or website name
+3. Find and include the complete URL/link to the article
+
+Format each article exactly as follows:
+[Article Summary - 2-3 sentences describing the key points]
+[Source/Website - the name of the publication or website]  
+[Link - the URL of the article]
+
+Requirements:
+- Only include articles that have clear source information and valid links
+- Separate each formatted article with a blank line
+- Ensure summaries are informative and capture the essence of the story
+- Extract exact source names (e.g., 'TechCrunch', 'BBC News', 'Reuters')
+- Include complete, functional URLs
+- Skip any content that doesn't appear to be a proper news article
+- Maintain accuracy and avoid adding information not present in the original text
+'''
+    
+    new_filepath = pathlib.Path(output_filename)
+    formatted_response = generate_with_retry(
+        contents=[
+            types.Part.from_bytes(
+                data=new_filepath.read_bytes(),
+                mime_type='text/plain',
+            ),
+            prompt_1
+        ],
+        config=config
+    )
+    
+    # Save the formatted message version
+    message_filename = f"formatted_message_{news_number}_articles.txt"
+    with open(message_filename, "w", encoding="utf-8") as f:
+        f.write(formatted_response.text)
+    
+    print(f"Formatted message version saved to: {message_filename}")
 
 except Exception as e:
     print(f"Failed to complete curation: {e}")
