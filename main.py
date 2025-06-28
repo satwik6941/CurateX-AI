@@ -11,7 +11,9 @@ import dotenv as env
 
 # Import our existing modules
 import search
-import google
+# Import the LLM module
+import llm
+
 import curatex_bot
 
 # Load environment variables
@@ -48,16 +50,38 @@ class NewsCuratorBot:
             if not hasattr(search, 'set_user_query'):
                 logger.warning("search.py should have a set_user_query() function")
             
-            # Check if google module has required functions  
-            if not hasattr(google, 'main'):
-                logger.warning("google.py should have a main() function")
+            # Check if llm module has required functions with detailed inspection
+            logger.info(f"LLM module attributes: {[attr for attr in dir(llm) if not attr.startswith('_')]}")
+            
+            if not hasattr(llm, 'main'):
+                logger.error("❌ llm.py does not have a main() function")
+                # Try to find alternative function names
+                possible_functions = ['main', 'process', 'curate', 'run']
+                found_functions = [func for func in possible_functions if hasattr(llm, func)]
+                if found_functions:
+                    logger.info(f"Found alternative functions: {found_functions}")
+                else:
+                    logger.error("No suitable entry point found in llm.py")
+            else:
+                logger.info("✅ llm.py main() function found")
+            
+            # Check if global variables exist
+            if hasattr(llm, 'user_query'):
+                logger.info("✅ llm.user_query variable found")
+            else:
+                logger.warning("⚠️ llm.user_query variable not found")
                 
-            logger.info("✅ Module verification completed successfully")
+            if hasattr(llm, 'news_number'):
+                logger.info("✅ llm.news_number variable found")
+            else:
+                logger.warning("⚠️ llm.news_number variable not found")
+                
+            logger.info("✅ Module verification completed")
             
         except Exception as e:
             logger.error(f"❌ Module verification error: {e}")
             print(f"❌ Module verification failed: {e}")
-            print("💡 Make sure search.py and google.py are in the same directory")
+            print("💡 Make sure search.py and llm.py are in the same directory")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -74,7 +98,7 @@ I'm your personal news curator powered by AI. Here's how it works:
 **🔄 Complete Processing Pipeline:**
 1. 🎯 Collect your search query and preferences via `/input`
 2. � Pass query to `search.py` for article discovery  
-3. 🎯 Pass parameters to `google.py` for AI curation
+3. 🎯 Pass parameters to `llm.py` for AI curation
 4. 📤 Deliver results back to you in Telegram
 
 **📋 Available Commands:**
@@ -102,7 +126,7 @@ All user inputs are collected through this Telegram bot using `/input`
 
 2. **Automated Processing:**
    • 🔍 `search.py` receives your query
-   • 🎯 `google.py` receives query + article count
+   • 🎯 `llm.py` receives query + article count
    • 📝 AI processes and curates content
    • 📤 Results delivered via Telegram
 
@@ -311,7 +335,7 @@ All user inputs are collected through this Telegram bot using `/input`
 
 **🔄 Processing Pipeline:**
 1. 🔍 **search.py** will search for articles using your query
-2. 🎯 **google.py** will curate the top {session['news_count']} articles  
+2. 🎯 **llm.py** will curate the top {session['news_count']} articles  
 3. 📝 **Format** and prepare the results
 4. 📤 **Deliver** via Telegram
 
@@ -402,8 +426,8 @@ All user inputs are collected through this Telegram bot using `/input`
                 )
                 return
             
-            # Step 2: Pass query and count to google.py
-            await update.message.reply_text(f"🎯 **Step 2/4:** Passing inputs to google.py for curation of {news_count} articles...")
+            # Step 2: Pass query and count to llm.py
+            await update.message.reply_text(f"🎯 **Step 2/4:** Passing inputs to llm.py for curation of {news_count} articles...")
             curated_files = await self.run_curation(query, news_count)
             
             if not curated_files:
@@ -480,16 +504,37 @@ All user inputs are collected through this Telegram bot using `/input`
             return None
     
     def _run_curation_sync(self, query, count):
-        """Synchronous wrapper for curation function - passes Telegram inputs to google.py"""
+        """Synchronous wrapper for curation function - passes Telegram inputs to llm.py"""
         try:
-            logger.info(f"📤 Passing inputs to google.py: query='{query}', count={count}")
+            logger.info(f"📤 Passing inputs to llm.py: query='{query}', count={count}")
             
-            # Set the parameters in google module (inputs from Telegram bot)
-            google.user_query = query
-            google.news_number = count
+            # Debug: Check if llm module is properly imported
+            logger.info(f"LLM module type: {type(llm)}")
+            logger.info(f"LLM module file: {getattr(llm, '__file__', 'Unknown')}")
             
-            # Call the google module's main function
-            result = google.main()
+            # Set the parameters in llm module (inputs from Telegram bot)
+            if hasattr(llm, 'user_query'):
+                llm.user_query = query
+                logger.info(f"✅ Set llm.user_query = '{query}'")
+            else:
+                logger.error("❌ llm.user_query attribute not found")
+                
+            if hasattr(llm, 'news_number'):
+                llm.news_number = count
+                logger.info(f"✅ Set llm.news_number = {count}")
+            else:
+                logger.error("❌ llm.news_number attribute not found")
+            
+            # Check if main function exists before calling
+            if not hasattr(llm, 'main'):
+                logger.error("❌ llm.main function not found")
+                logger.info(f"Available functions: {[attr for attr in dir(llm) if callable(getattr(llm, attr)) and not attr.startswith('_')]}")
+                raise AttributeError("llm module has no attribute 'main'")
+            
+            # Call the llm module's main function
+            logger.info("🔄 Calling llm.main()...")
+            result = llm.main()
+            logger.info(f"✅ llm.main() returned: {result}")
             
             # Return the generated file paths
             output_filename = f"curated_news_{count}_articles.txt"
@@ -503,11 +548,19 @@ All user inputs are collected through this Telegram bot using `/input`
                 files.append(message_filename)
                 logger.info(f"✅ Created: {message_filename}")
             
-            logger.info(f"✅ Google.py completed successfully, generated {len(files)} files")
+            if not files:
+                logger.warning("⚠️ No output files were created by llm.py")
+            
+            logger.info(f"✅ LLM.py completed successfully, generated {len(files)} files")
             return files
             
+        except AttributeError as e:
+            logger.error(f"❌ LLM.py attribute error: {e}")
+            logger.info("💡 This usually means the llm.py file doesn't have the expected functions or variables")
+            return None
         except Exception as e:
-            logger.error(f"❌ Google.py execution error: {e}")
+            logger.error(f"❌ LLM.py execution error: {e}")
+            logger.error(f"Error type: {type(e).__name__}")
             return None
 
     async def send_results(self, update, files):
@@ -700,7 +753,7 @@ All user inputs are collected through this Telegram bot using `/input`
         
         logger.info("🤖 CurateX AI Bot starting...")
         logger.info("📋 Workflow: User Input -> Search -> Curation -> Formatting -> Delivery")
-        logger.info("🔗 Integrating: search.py -> google.py -> curatex_bot.py")
+        logger.info("🔗 Integrating: search.py -> llm.py -> curatex_bot.py")
         
         print("🤖 CurateX AI Bot is running...")
         print("📱 Send 'hi' to your bot to get started!")
@@ -724,7 +777,7 @@ def main():
     """Main function"""
     try:
         print("🚀 Initializing CurateX AI News Curation System...")
-        print("📋 Workflow: User Query -> Search (search.py) -> Curate (google.py) -> Format -> Deliver (curatex_bot.py)")
+        print("📋 Workflow: User Query -> Search (search.py) -> Curate (llm.py) -> Format -> Deliver (curatex_bot.py)")
         
         bot = NewsCuratorBot()
         bot.run()
