@@ -13,6 +13,8 @@ import dotenv as env
 import search
 # Import the LLM module
 import llm
+# Import RAG module for handling post-news questions
+import rag
 
 import curatex_bot
 
@@ -31,6 +33,9 @@ QUERY, NEWS_COUNT, DELIVERY_TIME, CONFIRM = range(4)
 
 # User data storage
 user_sessions = {}
+
+# Track users who have received news and can ask questions
+users_with_news_context = set()
 
 class NewsCuratorBot:
     def __init__(self):
@@ -75,13 +80,24 @@ class NewsCuratorBot:
                 logger.info("✅ llm.news_number variable found")
             else:
                 logger.warning("⚠️ llm.news_number variable not found")
+            
+            # Check RAG module
+            if hasattr(rag, 'setup_news_rag'):
+                logger.info("✅ rag.py setup_news_rag() function found")
+            else:
+                logger.warning("⚠️ rag.py setup_news_rag() function not found")
+                
+            if hasattr(rag, 'answer_news_question'):
+                logger.info("✅ rag.py answer_news_question() function found")
+            else:
+                logger.warning("⚠️ rag.py answer_news_question() function not found")
                 
             logger.info("✅ Module verification completed")
             
         except Exception as e:
             logger.error(f"❌ Module verification error: {e}")
             print(f"❌ Module verification failed: {e}")
-            print("💡 Make sure search.py and llm.py are in the same directory")
+            print("💡 Make sure search.py, llm.py, and rag.py are in the same directory")
     
     async def start_command(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Handle /start command"""
@@ -100,11 +116,17 @@ I'm your personal news curator powered by AI. Here's how it works:
 2. � Pass query to `search.py` for article discovery  
 3. 🎯 Pass parameters to `llm.py` for AI curation
 4. 📤 Deliver results back to you in Telegram
+5. 💬 **Ask me questions about the news - I'll answer using AI!**
 
 **📋 Available Commands:**
 • `/input` - Start news curation (collects all inputs)
 • `/help` - Show detailed usage guide
 • `/cancel` - Cancel current operation
+
+**💡 After receiving curated news:**
+• Just send me any question about the articles
+• I'll use AI-powered search to find answers from your curated content
+• Perfect for clarifications, deeper insights, or follow-up questions!
 
 **🚀 Ready to start?** Just type `/input` or say "hi"!
         """
@@ -130,16 +152,23 @@ All user inputs are collected through this Telegram bot using `/input`
    • 📝 AI processes and curates content
    • 📤 Results delivered via Telegram
 
+3. **Interactive Q&A:**
+   • 💬 After receiving news, ask me any questions!
+   • 🧠 I'll use AI-powered RAG to answer from your curated articles
+   • 🔄 Maintains conversation context for follow-up questions
+
 **🎯 Key Features:**
 • **No external input needed** - everything via Telegram
 • **AI-powered curation** with multiple sources
 • **Detailed summaries** and analysis
+• **Interactive Q&A** about your curated news
 • **Scheduled delivery** options
 • **Quality filtering** and ranking
 
 **📝 Usage Tips:**
 • Be specific with queries for better results
 • More articles = better curation but longer processing
+• Ask follow-up questions about the news after delivery
 • Use `/cancel` anytime to restart
 • All your preferences are saved during the session
 
@@ -148,13 +177,19 @@ All user inputs are collected through this Telegram bot using `/input`
         await update.message.reply_text(help_text, parse_mode='Markdown')
     
     async def greeting_handler(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
-        """Handle greetings and show command options"""
+        """Handle greetings and general messages, including questions about news"""
         message_text = update.message.text.lower()
+        user_id = update.effective_user.id
         greetings = ['hi', 'hello', 'hey', 'start', 'begin']
         
         # Check if the message is a button click (contains command)
         if any(cmd in update.message.text for cmd in ['/input', '/help', '/start']):
             # Don't handle button clicks here - let the command handlers take care of them
+            return
+        
+        # If user has news context and this isn't a greeting, treat it as a question
+        if user_id in users_with_news_context and not any(greeting in message_text for greeting in greetings):
+            await self.handle_news_question(update, context)
             return
         
         if any(greeting in message_text for greeting in greetings):
@@ -165,14 +200,29 @@ All user inputs are collected through this Telegram bot using `/input`
             ]
             reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
             
+            response_text = "👋 Hello! What would you like to do today?"
+            
+            # Add news context info if user has it
+            if user_id in users_with_news_context:
+                response_text += "\n\n💬 **You can also ask me questions about your curated news!**"
+            
             await update.message.reply_text(
-                "👋 Hello! What would you like to do today?",
+                response_text,
                 reply_markup=reply_markup
             )
         else:
-            await update.message.reply_text(
-                "I didn't understand that. Try saying 'hi' or use /help for available commands."
-            )
+            # If user has news context, suggest they can ask questions
+            if user_id in users_with_news_context:
+                await update.message.reply_text(
+                    "💬 I can help answer questions about your curated news!\n\n"
+                    "Just ask me anything about the articles I shared with you, or use:\n"
+                    "• /input - Get new curated news\n"
+                    "• /help - Learn how to use the bot"
+                )
+            else:
+                await update.message.reply_text(
+                    "I didn't understand that. Try saying 'hi' or use /help for available commands."
+                )
     
     async def start_input_flow(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
         """Start the input collection conversation"""
@@ -490,8 +540,6 @@ All user inputs are collected through this Telegram bot using `/input`
             logger.error(f"❌ Search.py execution error: {e}")
             return False
     
-    # ...existing code...
-    
     async def run_curation(self, query, count):
         """Run the curation module"""
         try:
@@ -567,6 +615,7 @@ All user inputs are collected through this Telegram bot using `/input`
         """Send the curated results to user"""
         try:
             chat_id = update.effective_chat.id
+            user_id = update.effective_user.id
             
             await update.message.reply_text(
                 "✅ **Curation Complete!**\n\n"
@@ -610,8 +659,13 @@ All user inputs are collected through this Telegram bot using `/input`
                                 parse_mode='Markdown'
                             )
             
+            # Setup RAG system with the curated news files for future questions
+            await self.setup_rag_for_user(user_id, files)
+            
             await update.message.reply_text(
                 "🎉 **All done!** Your curated news has been delivered.\n\n"
+                "💬 **You can now ask me questions about the news!**\n"
+                "Just send me any question and I'll answer using the context of your curated articles.\n\n"
                 "Use /input for another curation request.",
                 parse_mode='Markdown'
             )
@@ -625,6 +679,8 @@ All user inputs are collected through this Telegram bot using `/input`
     async def schedule_delivery(self, update, context, files, delivery_time):
         """Schedule delivery for later using curatex_bot functionality"""
         try:
+            user_id = update.effective_user.id
+            
             # Find the message file (formatted_message_*.txt)
             message_files = [f for f in files if 'formatted_message' in f]
             
@@ -632,6 +688,9 @@ All user inputs are collected through this Telegram bot using `/input`
                 # Copy the formatted message file to messages_to_user.txt for curatex_bot
                 import shutil
                 shutil.copy(message_files[0], 'messages_to_user.txt')
+                
+                # Setup RAG system for this user even with scheduled delivery
+                await self.setup_rag_for_user(user_id, files)
                 
                 # Parse the delivery time
                 delivery_hour, delivery_minute = map(int, delivery_time.split(':'))
@@ -641,7 +700,9 @@ All user inputs are collected through this Telegram bot using `/input`
                     f"Your curated news will be delivered daily at {delivery_time}\n"
                     f"The CurateX bot will send you the messages automatically.\n\n"
                     f"📝 Messages have been prepared and saved.\n"
-                    f"🤖 Background scheduler is now active.",
+                    f"🤖 Background scheduler is now active.\n\n"
+                    f"💬 **You can now ask me questions about the curated news!**\n"
+                    f"Just send me any question and I'll search through your articles.",
                     parse_mode='Markdown'
                 )
                 
@@ -752,12 +813,13 @@ All user inputs are collected through this Telegram bot using `/input`
         application = self.create_application()
         
         logger.info("🤖 CurateX AI Bot starting...")
-        logger.info("📋 Workflow: User Input -> Search -> Curation -> Formatting -> Delivery")
-        logger.info("🔗 Integrating: search.py -> llm.py -> curatex_bot.py")
+        logger.info("📋 Workflow: User Input -> Search -> Curation -> Formatting -> Delivery -> Q&A")
+        logger.info("🔗 Integrating: search.py -> llm.py -> curatex_bot.py -> rag.py")
         
         print("🤖 CurateX AI Bot is running...")
         print("📱 Send 'hi' to your bot to get started!")
-        print("🔄 Workflow ready: Search -> Curate -> Format -> Deliver")
+        print("🔄 Workflow ready: Search -> Curate -> Format -> Deliver -> Q&A")
+        print("💬 New: Ask questions about your curated news using AI-powered RAG!")
         
         # Run the bot
         application.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -773,11 +835,127 @@ All user inputs are collected through this Telegram bot using `/input`
             except Exception as e:
                 logger.error(f"Error cleaning up {file}: {e}")
 
+    async def setup_rag_for_user(self, user_id, news_files):
+        """Setup RAG system with curated news files for answering user questions"""
+        try:
+            logger.info(f"Setting up RAG system for user {user_id}")
+            
+            # Copy the curated news files to the data directory for RAG
+            import shutil
+            data_dir = "data"
+            
+            # Ensure data directory exists
+            os.makedirs(data_dir, exist_ok=True)
+            
+            # Copy curated news files to data directory
+            for file_path in news_files:
+                if os.path.exists(file_path):
+                    dest_path = os.path.join(data_dir, os.path.basename(file_path))
+                    shutil.copy2(file_path, dest_path)
+                    logger.info(f"Copied {file_path} to {dest_path}")
+            
+            # Also copy news_results.txt if it exists
+            if os.path.exists('news_results.txt'):
+                shutil.copy2('news_results.txt', os.path.join(data_dir, 'news_results.txt'))
+                logger.info("Copied news_results.txt to data directory")
+            
+            # Setup the RAG system with the news files
+            loop = asyncio.get_event_loop()
+            rag_setup_success = await loop.run_in_executor(None, rag.setup_news_rag, data_dir)
+            
+            if rag_setup_success:
+                # Add user to the set of users who can ask questions
+                users_with_news_context.add(user_id)
+                logger.info(f"✅ RAG system setup successful for user {user_id}")
+            else:
+                logger.warning(f"⚠️ RAG system setup failed for user {user_id}")
+                
+        except Exception as e:
+            logger.error(f"Error setting up RAG for user {user_id}: {e}")
+    
+    async def handle_news_question(self, update: Update, context: ContextTypes.DEFAULT_TYPE):
+        """Handle user questions about the news using RAG system"""
+        user_id = update.effective_user.id
+        question = update.message.text.strip()
+        
+        # Check if this user has news context
+        if user_id not in users_with_news_context:
+            await update.message.reply_text(
+                "🤔 I don't have any news context for you yet.\n\n"
+                "Please use /input to curate some news first, then I can answer questions about it!",
+                parse_mode='Markdown'
+            )
+            return
+        
+        try:
+            await update.message.reply_text(
+                "🤔 **Thinking about your question...**\n\n"
+                "Searching through your curated news to find the answer...",
+                parse_mode='Markdown'
+            )
+            
+            # Use RAG system to answer the question
+            loop = asyncio.get_event_loop()
+            answer = await loop.run_in_executor(None, self._answer_question_sync, question)
+            
+            if answer:
+                # Split long answers into chunks
+                max_length = 4000
+                if len(answer) > max_length:
+                    chunks = [answer[i:i+max_length] for i in range(0, len(answer), max_length)]
+                    for i, chunk in enumerate(chunks):
+                        await update.message.reply_text(
+                            f"💬 **Answer (Part {i+1}/{len(chunks)}):**\n\n{chunk}",
+                            parse_mode='Markdown'
+                        )
+                        await asyncio.sleep(1)
+                else:
+                    await update.message.reply_text(
+                        f"💬 **Answer:**\n\n{answer}",
+                        parse_mode='Markdown'
+                    )
+                    
+                await update.message.reply_text(
+                    "❓ **Have more questions?** Just ask me anything about the news!\n"
+                    "Or use /input to get new curated news.",
+                    parse_mode='Markdown'
+                )
+            else:
+                await update.message.reply_text(
+                    "❌ Sorry, I couldn't find an answer to your question in the curated news.\n\n"
+                    "Try rephrasing your question or use /input to get fresh news content.",
+                    parse_mode='Markdown'
+                )
+                
+        except Exception as e:
+            logger.error(f"Error answering question: {e}")
+            await update.message.reply_text(
+                f"❌ An error occurred while processing your question: {str(e)}\n\n"
+                "Please try asking again or use /input for new news curation.",
+                parse_mode='Markdown'
+            )
+    
+    def _answer_question_sync(self, question):
+        """Synchronous wrapper for RAG question answering"""
+        try:
+            # Use the async function from rag module
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            try:
+                answer = loop.run_until_complete(rag.answer_news_question(question))
+                return answer
+            finally:
+                loop.close()
+        except Exception as e:
+            logger.error(f"Error in sync question answering: {e}")
+            return None
+
 def main():
     """Main function"""
     try:
         print("🚀 Initializing CurateX AI News Curation System...")
         print("📋 Workflow: User Query -> Search (search.py) -> Curate (llm.py) -> Format -> Deliver (curatex_bot.py)")
+        print("💬 New Feature: RAG-powered Q&A about curated news using rag.py")
         
         bot = NewsCuratorBot()
         bot.run()

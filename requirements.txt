@@ -9,3 +9,10 @@ logging
 asyncio
 python-telegram-bot
 requests
+llama-index
+llama-index-llms-groq
+llama-index-embeddings-huggingface
+llama-index-retrievers-bm25
+torch
+transformers
+sentence-transformers
