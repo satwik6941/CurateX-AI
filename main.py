@@ -193,14 +193,47 @@ All user inputs are collected through this Telegram bot using `/input`
             return
         
         if any(greeting in message_text for greeting in greetings):
+            user = update.effective_user
+            
+            # First, send the welcome message
+            welcome_message = f"""
+🤖 **Welcome to CurateX AI News Bot, {user.first_name}!**
+
+I'm your personal news curator powered by AI. Here's how it works:
+
+**� All inputs collected via Telegram:**
+• Use `/input` to start - I'll collect all your preferences
+• No external input needed - everything happens in this chat!
+
+**🔄 Complete Processing Pipeline:**
+1. 🎯 Collect your search query and preferences via `/input`
+2. 🔍 Pass query to `search.py` for article discovery  
+3. 🎯 Pass parameters to `llm.py` for AI curation
+4. 📤 Deliver results back to you in Telegram
+5. 💬 **Ask me questions about the news - I'll answer using AI!**
+
+**📋 Available Commands:**
+• `/input` - Start news curation (collects all inputs)
+• `/help` - Show detailed usage guide
+• `/cancel` - Cancel current operation
+
+**💡 After receiving curated news:**
+• Just send me any question about the articles
+• I'll use AI-powered search to find answers from your curated content
+• Perfect for clarifications, deeper insights, or follow-up questions!
+            """
+            
+            await update.message.reply_text(welcome_message, parse_mode='Markdown')
+            
+            # Then show the buttons with just the command part
             keyboard = [
-                ['📰 /input - Start News Curation'],
-                ['❓ /help - How to Use'],
-                ['ℹ️ /start - Welcome Message']
+                ['/input'],
+                ['/help'],
+                ['/start']
             ]
             reply_markup = ReplyKeyboardMarkup(keyboard, one_time_keyboard=True, resize_keyboard=True)
             
-            response_text = "👋 Hello! What would you like to do today?"
+            response_text = "👋 What would you like to do today?"
             
             # Add news context info if user has it
             if user_id in users_with_news_context:
@@ -208,7 +241,8 @@ All user inputs are collected through this Telegram bot using `/input`
             
             await update.message.reply_text(
                 response_text,
-                reply_markup=reply_markup
+                reply_markup=reply_markup,
+                parse_mode='Markdown'
             )
         else:
             # If user has news context, suggest they can ask questions
@@ -612,69 +646,90 @@ All user inputs are collected through this Telegram bot using `/input`
             return None
 
     async def send_results(self, update, files):
-        """Send the curated results to user"""
+        """Send the curated results to user as messages, not as txt files"""
         try:
             chat_id = update.effective_chat.id
             user_id = update.effective_user.id
-            
+
             await update.message.reply_text(
                 "✅ **Curation Complete!**\n\n"
-                "📎 Sending your curated news files...",
+                "📎 Sending your curated news as messages...",
                 parse_mode='Markdown'
             )
-            
-            # Send files directly using the bot
-            if files:
-                for file_path in files:
-                    if os.path.exists(file_path):
-                        # Send as document
-                        with open(file_path, 'rb') as file:
-                            await update.message.reply_document(
-                                document=file,
-                                filename=os.path.basename(file_path),
-                                caption=f"📰 {os.path.basename(file_path)}"
-                            )
-                        await asyncio.sleep(1)  # Rate limiting
-                
-                # Also send the message content as text for easy reading
-                message_files = [f for f in files if 'formatted_message' in f]
-                if message_files:
+
+            # Send each curated news file as a message (not as a txt file)
+            for file_path in files:
+                if os.path.exists(file_path) and file_path.endswith('.txt'):
                     try:
-                        with open(message_files[0], 'r', encoding='utf-8') as f:
+                        with open(file_path, 'r', encoding='utf-8') as f:
                             content = f.read()
-                            # Split into chunks if too long (Telegram limit ~4096 chars)
-                            chunks = [content[i:i+4000] for i in range(0, len(content), 4000)]
-                            for i, chunk in enumerate(chunks):
-                                await update.message.reply_text(
-                                    f"📰 **News Summary (Part {i+1}/{len(chunks)}):**\n\n{chunk}",
-                                    parse_mode='Markdown'
-                                )
-                                await asyncio.sleep(1)
-                    except UnicodeDecodeError:
-                        # Try with different encoding if UTF-8 fails
-                        with open(message_files[0], 'r', encoding='latin-1') as f:
-                            content = f.read()
+                            
+                        # Clean the content to avoid Markdown parsing issues
+                        safe_content = self.clean_markdown_content(content)
+                        
+                        # Split into chunks (Telegram max 4096, use 3000 for safety)
+                        max_length = 3000
+                        chunks = [safe_content[i:i+max_length] for i in range(0, len(safe_content), max_length)]
+                        
+                        for i, chunk in enumerate(chunks):
+                            # Send as plain text to avoid parsing errors
                             await update.message.reply_text(
-                                f"📰 **News Summary:**\n\n{content[:4000]}",
-                                parse_mode='Markdown'
+                                f"📰 {os.path.basename(file_path)} (Part {i+1}/{len(chunks)})\n\n{chunk}",
+                                parse_mode=None  # Disable all Markdown parsing
                             )
-            
+                            await asyncio.sleep(1)
+                            
+                    except Exception as file_error:
+                        logger.error(f"Error reading file {file_path}: {file_error}")
+                        await update.message.reply_text(
+                            f"❌ Error reading file: {os.path.basename(file_path)}",
+                            parse_mode=None
+                        )
+
             # Setup RAG system with the curated news files for future questions
             await self.setup_rag_for_user(user_id, files)
-            
+
             await update.message.reply_text(
-                "🎉 **All done!** Your curated news has been delivered.\n\n"
-                "💬 **You can now ask me questions about the news!**\n"
+                "🎉 All done! Your curated news has been delivered as messages.\n\n"
+                "💬 You can now ask me questions about the news!\n"
                 "Just send me any question and I'll answer using the context of your curated articles.\n\n"
                 "Use /input for another curation request.",
-                parse_mode='Markdown'
+                parse_mode=None
             )
-            
+
         except Exception as e:
             logger.error(f"Send error: {e}")
             await update.message.reply_text(
-                f"❌ Error sending files: {str(e)}"
+                f"❌ Error sending news: {str(e)}",
+                parse_mode=None
             )
+    
+    def clean_markdown_content(self, content):
+        """Clean content to avoid Markdown parsing issues"""
+        try:
+            import re
+            
+            # Remove all Markdown special characters to prevent parsing errors
+            # This is safer than trying to balance them
+            content = re.sub(r'[*_`\[\](){}#~|\\]', '', content)
+            
+            # Remove excessive whitespace and newlines
+            content = re.sub(r'\n{3,}', '\n\n', content)
+            content = re.sub(r'[ \t]+', ' ', content)
+            
+            # Remove any remaining problematic characters
+            content = re.sub(r'[^\w\s\-.,!?:;"\'/\n]', '', content)
+            
+            # Clean up any remaining formatting issues
+            content = content.strip()
+            
+            return content
+            
+        except Exception as e:
+            logger.error(f"Error cleaning markdown content: {e}")
+            # If cleaning fails, return plain text without any special characters
+            import re
+            return re.sub(r'[^\w\s\-.,!?:;"\'/\n]', '', str(content))
     
     async def schedule_delivery(self, update, context, files, delivery_time):
         """Schedule delivery for later using curatex_bot functionality"""
