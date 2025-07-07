@@ -25,8 +25,9 @@ if not os.getenv("GROQ_API_KEY"):
 
 # Settings control global defaults
 Settings.embed_model = HuggingFaceEmbedding(
-    model_name="BAAI/bge-base-en-v1.5", 
-    cache_folder="./cache"
+    model_name="intfloat/e5-large-v2", 
+    cache_folder="./cache",
+    device="cuda"  # Use CUDA for GPU acceleration
 )
 Settings.llm = Groq(
     model="llama-3.1-8b-instant",
@@ -34,61 +35,12 @@ Settings.llm = Groq(
     request_timeout=360.0,
 )
 
-# Try to load existing storage, otherwise create new indexes
-storage_dir = "storage"
-try:
-    print("Trying to load existing indexes from storage...")
-    storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
-    vector_index = load_index_from_storage(storage_context, index_id="vector")
-    keyword_index = load_index_from_storage(storage_context, index_id="keyword")
-    print("Loaded existing indexes from storage.")
-    
-    # Still need to load documents for BM25 (not stored)
-    documents = SimpleDirectoryReader("data").load_data()
-    parser = SimpleNodeParser.from_defaults(
-        chunk_size=1000,
-        chunk_overlap=200,
-    )
-    nodes = parser.get_nodes_from_documents(documents)
-    
-except Exception as e:
-    print(f"Could not load from storage ({e}), creating new indexes...")
-    
-    print("Loading documents...")
-    try:
-        documents = SimpleDirectoryReader("data").load_data()
-        print(f"Loaded {len(documents)} documents.")
-    except Exception as e:
-        print(f"Error loading documents: {e}")
-        raise
-
-    # Parse documents into nodes for BM25 with proper chunking
-    print("Parsing documents into nodes with chunking...")
-    parser = SimpleNodeParser.from_defaults(
-        chunk_size=1000,  # Smaller chunks for better retrieval
-        chunk_overlap=200,  # Some overlap to maintain context
-    )
-    nodes = parser.get_nodes_from_documents(documents)
-
-    print("Creating indexes...")
-    # Create vector store index from nodes (with chunking)
-    vector_index = VectorStoreIndex(nodes, embed_model=Settings.embed_model)
-    
-    # Create keyword table index from nodes
-    keyword_index = SimpleKeywordTableIndex(nodes)
-    
-    # Save indexes to storage
-    print("Saving indexes to storage...")
-    vector_index.set_index_id("vector")
-    keyword_index.set_index_id("keyword")
-    vector_index.storage_context.persist(persist_dir=storage_dir)
-    keyword_index.storage_context.persist(persist_dir=storage_dir)
-
-print("Creating retrievers...")
-# Create retrievers with smaller top_k to reduce context size
-vector_retriever = vector_index.as_retriever(similarity_top_k=3)
-keyword_retriever = keyword_index.as_retriever(similarity_top_k=3)
-bm25_retriever = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=3)
+# Global variables for indexes - will be initialized when setup_news_rag is called
+vector_index = None
+keyword_index = None
+hybrid_query_engine = None
+nodes = None
+conversation_history = []
 
 # Define a custom hybrid retriever class
 class HybridRetriever(BaseRetriever):
@@ -122,29 +74,103 @@ class HybridRetriever(BaseRetriever):
         # Return the unique nodes as a list
         return list(unique_nodes.values())
 
-# Instantiate the hybrid retriever
-hybrid_retriever = HybridRetriever([vector_retriever, keyword_retriever, bm25_retriever])
+def setup_news_rag(data_dir="data"):
+    """Setup RAG system with news files from the specified directory"""
+    global vector_index, keyword_index, hybrid_query_engine, nodes
+    
+    try:
+        # Check if data directory exists and has files
+        if not os.path.exists(data_dir):
+            print(f"Data directory {data_dir} does not exist")
+            return False
+            
+        # Get list of files in data directory
+        files = [f for f in os.listdir(data_dir) if f.endswith('.txt')]
+        if not files:
+            print(f"No .txt files found in {data_dir}")
+            return False
+            
+        print(f"Setting up RAG with {len(files)} files from {data_dir}")
+        
+        # Try to load existing storage, otherwise create new indexes
+        storage_dir = "storage"
+        try:
+            print("Trying to load existing indexes from storage...")
+            storage_context = StorageContext.from_defaults(persist_dir=storage_dir)
+            vector_index = load_index_from_storage(storage_context, index_id="vector")
+            keyword_index = load_index_from_storage(storage_context, index_id="keyword")
+            print("Loaded existing indexes from storage.")
+            
+            # Still need to load documents for BM25 (not stored)
+            documents = SimpleDirectoryReader(data_dir).load_data()
+            parser = SimpleNodeParser.from_defaults(
+                chunk_size=1000,
+                chunk_overlap=200,
+            )
+            nodes = parser.get_nodes_from_documents(documents)
+            
+        except Exception as e:
+            print(f"Could not load from storage ({e}), creating new indexes...")
+            
+            print("Loading documents...")
+            try:
+                documents = SimpleDirectoryReader(data_dir).load_data()
+                print(f"Loaded {len(documents)} documents.")
+            except Exception as e:
+                print(f"Error loading documents: {e}")
+                return False
 
-# Create hybrid query engine
-hybrid_query_engine = RetrieverQueryEngine.from_args(
-    retriever=hybrid_retriever,
-    llm=Settings.llm,
-)
+            # Parse documents into nodes for BM25 with proper chunking
+            print("Parsing documents into nodes with chunking...")
+            parser = SimpleNodeParser.from_defaults(
+                chunk_size=1000,  # Smaller chunks for better retrieval
+                chunk_overlap=200,  # Some overlap to maintain context
+            )
+            nodes = parser.get_nodes_from_documents(documents)
 
-print("Creating query engine...")
+            print("Creating indexes...")
+            # Create vector store index from nodes (with chunking)
+            vector_index = VectorStoreIndex(nodes, embed_model=Settings.embed_model)
+            
+            # Create keyword table index from nodes
+            keyword_index = SimpleKeywordTableIndex(nodes)
+            
+            # Save indexes to storage
+            print("Saving indexes to storage...")
+            vector_index.set_index_id("vector")
+            keyword_index.set_index_id("keyword")
+            vector_index.storage_context.persist(persist_dir=storage_dir)
+            keyword_index.storage_context.persist(persist_dir=storage_dir)
 
-# Conversation context to maintain chat history
-conversation_history = []
+        print("Creating retrievers...")
+        # Create retrievers with smaller top_k to reduce context size
+        vector_retriever = vector_index.as_retriever(similarity_top_k=3)
+        keyword_retriever = keyword_index.as_retriever(similarity_top_k=3)
+        bm25_retriever = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=3)
+
+        # Instantiate the hybrid retriever
+        hybrid_retriever = HybridRetriever([vector_retriever, keyword_retriever, bm25_retriever])
+
+        # Create hybrid query engine
+        hybrid_query_engine = RetrieverQueryEngine.from_args(
+            retriever=hybrid_retriever,
+            llm=Settings.llm,
+        )
+
+        print("RAG system setup completed successfully!")
+        return True
+        
+    except Exception as e:
+        print(f"Error setting up RAG system: {e}")
+        return False
 
 async def search_documents_with_context(query: str) -> str:
-    """Search through documents using hybrid retrieval with conversation context
+    """Search through documents using hybrid retrieval with conversation context"""
+    global hybrid_query_engine, conversation_history
     
-    Args:
-        query (str): The search query to find relevant documents
-        
-    Returns:
-        str: The response from the document search
-    """
+    if hybrid_query_engine is None:
+        return "RAG system not initialized. Please run setup_news_rag first."
+    
     try:
         # Build context-aware query
         if conversation_history:
@@ -177,86 +203,6 @@ Please answer the current question, considering the conversation context above.
     except Exception as e:
         return f"Error searching documents: {str(e)}"
 
-async def main():
-    print("Document search ready! You can ask questions about documents.")
-    print("The system will remember our conversation context.")
-    
-    while True:
-        try:
-            user_query = input("\nEnter your query (or 'quit' to exit): ")
-            if user_query.lower() in ['quit', 'exit', 'q']:
-                break
-                
-            print("Processing...")
-            
-            # Use direct search with context
-            result = await search_documents_with_context(user_query)
-            print(f"\nResponse: {result}")
-            
-        except KeyboardInterrupt:
-            print("\nExiting...")
-            break
-        except Exception as e:
-            print(f"Error: {str(e)}")
-            # Final fallback
-            try:
-                print("Trying fallback search...")
-                # Try sync version as final fallback
-                response = hybrid_query_engine.query(user_query)
-                print(f"Fallback result: {response}")
-            except Exception as fallback_error:
-                print(f"All methods failed: {fallback_error}")
-
-# Run the agent
-if __name__ == "__main__":
-    asyncio.run(main())
-
-def setup_news_rag(news_files_dir="data"):
-    """Setup RAG system specifically for news files"""
-    global documents, nodes, vector_index, keyword_index, hybrid_retriever, hybrid_query_engine
-    
-    try:
-        # Ensure the directory exists and has files
-        if not os.path.exists(news_files_dir) or not os.listdir(news_files_dir):
-            print(f"No files found in {news_files_dir}")
-            return False
-            
-        # Reload documents from the specific directory
-        documents = SimpleDirectoryReader(news_files_dir).load_data()
-        if not documents:
-            print("No documents loaded")
-            return False
-            
-        # Recreate nodes and indexes for the new documents
-        parser = SimpleNodeParser.from_defaults(
-            chunk_size=1000,
-            chunk_overlap=200,
-        )
-        nodes = parser.get_nodes_from_documents(documents)
-        
-        # Recreate indexes
-        vector_index = VectorStoreIndex(nodes, embed_model=Settings.embed_model)
-        keyword_index = SimpleKeywordTableIndex(nodes)
-        
-        # Recreate retrievers
-        vector_retriever = vector_index.as_retriever(similarity_top_k=3)
-        keyword_retriever = keyword_index.as_retriever(similarity_top_k=3)
-        bm25_retriever = BM25Retriever.from_defaults(nodes=nodes, similarity_top_k=3)
-        
-        # Recreate hybrid retriever and query engine
-        hybrid_retriever = HybridRetriever([vector_retriever, keyword_retriever, bm25_retriever])
-        hybrid_query_engine = RetrieverQueryEngine.from_args(
-            retriever=hybrid_retriever,
-            llm=Settings.llm,
-        )
-        
-        print(f"RAG system reloaded with {len(documents)} documents from {news_files_dir}")
-        return True
-        
-    except Exception as e:
-        print(f"Error setting up news RAG: {e}")
-        return False
-
 async def answer_news_question(question):
     """Answer a question about the news using the RAG system"""
     try:
@@ -264,3 +210,36 @@ async def answer_news_question(question):
         return await search_documents_with_context(question)
     except Exception as e:
         return f"Error answering question: {str(e)}"
+
+# Only initialize if this file is run directly for testing
+if __name__ == "__main__":
+    async def main():
+        print("Document search ready! You can ask questions about documents.")
+        print("The system will remember our conversation context.")
+        
+        # Try to setup with data folder
+        success = setup_news_rag("data")
+        if not success:
+            print("Failed to setup RAG system. Make sure there are .txt files in the data folder.")
+            return
+        
+        while True:
+            try:
+                user_query = input("\nEnter your query (or 'quit' to exit): ")
+                if user_query.lower() in ['quit', 'exit', 'q']:
+                    break
+                    
+                print("Processing...")
+                
+                # Use direct search with context
+                result = await search_documents_with_context(user_query)
+                print(f"\nResponse: {result}")
+                
+            except KeyboardInterrupt:
+                print("\nExiting...")
+                break
+            except Exception as e:
+                print(f"Error: {str(e)}")
+
+    # Run the agent
+    asyncio.run(main())

@@ -7,7 +7,6 @@ from newspaper import Article
 
 env.load_dotenv()
 
-# Client will be initialized when needed
 client = None
 
 # Global variable to store user query (set by main.py)
@@ -138,78 +137,44 @@ def run_search_process():
     response = client.models.generate_content(
         model="gemini-2.0-flash",
         config=types.GenerateContentConfig(
-            system_instruction="You are an expert in providing news articles. Based on the user query, create a list of top 20 keywords that are highly relevant to the query.The keywords can contain more than one word also to keep the users context. Return only the keywords, one per line, without numbering or additional text.",),
+            system_instruction="You are an expert in providing news articles. Based on the user query, create a list of top 20 keywords that are highly relevant to the query." \
+            "The keywords can contain more than one word also to keep the users context. Return only the keywords, one per line, without numbering or additional text.",),
         contents=user_query,
     )
 
     keywords_text = response.text
     keywords_list = [keyword.strip() for keyword in keywords_text.split('\n') if keyword.strip()]
 
-    # Define the specific websites to search
-    TECH_WEBSITES = [
-        "tomsguide.com",
-        "techwiser.com",
-        "techradar.com",
-        "tech.hindustantimes.com",
-        "gsmarena.com",
-        "techcrunch.com",
-        "wired.com",
-        "thenextweb.com",
-        "in.mashable.com",
-        "artificialintelligence-news.com"
-    ]
-
-    # Collect articles from tech websites first (first 100)
-    specific_articles = []
+    # Collect 200 unique articles from general web
+    all_articles = []
     seen_urls = set()
 
-    print("Fetching articles from tech websites...")
+    print("Fetching articles from the web...")
     for keyword in keywords_list:
-        if len(specific_articles) >= 100:
+        if len(all_articles) >= 200:
             break
             
-        print(f"Fetching tech news for keyword: {keyword}")
-        articles = get_news_for_keyword(keyword, TECH_WEBSITES, max_articles=10, from_specific_sites=True)
-        
-        # Add unique articles only
-        for article in articles:
-            if article['url'] not in seen_urls and len(specific_articles) < 100:
-                seen_urls.add(article['url'])
-                specific_articles.append(article)
-                
-        print(f"Found {len(articles)} tech articles for '{keyword}', Total specific articles: {len(specific_articles)}")
-
-    # Collect articles from general web (next 100)
-    general_articles = []
-
-    print("\nFetching articles from general web...")
-    for keyword in keywords_list:
-        if len(general_articles) >= 100:
-            break
-            
-        print(f"Fetching general news for keyword: {keyword}")
+        print(f"Fetching news for keyword: {keyword}")
         articles = get_news_for_keyword(keyword, None, max_articles=10, from_specific_sites=False)
         
         # Add unique articles only
         for article in articles:
-            if article['url'] not in seen_urls and len(general_articles) < 100:
+            if article['url'] not in seen_urls and len(all_articles) < 200:
                 seen_urls.add(article['url'])
-                general_articles.append(article)
+                all_articles.append(article)
                 
-        print(f"Found {len(articles)} general articles for '{keyword}', Total general articles: {len(general_articles)}")
+        print(f"Found {len(articles)} articles for '{keyword}', Total unique articles: {len(all_articles)}")
 
-    # Combine all articles
-    final_articles = specific_articles + general_articles
+    # Ensure data folder exists
+    os.makedirs("data", exist_ok=True)
 
-    # Save to file
-    with open("news_results.txt", "w", encoding="utf-8") as f:
+    # Save to file in data folder
+    with open("data/news_results.txt", "w", encoding="utf-8") as f:
         f.write(f"Search Query: {user_query}\n")
-        f.write(f"Total Articles Found: {len(final_articles)}\n")
-        f.write(f"Tech Website Articles: {len(specific_articles)}\n")
-        f.write(f"General Web Articles: {len(general_articles)}\n")
+        f.write(f"Total Articles Found: {len(all_articles)}\n")
         f.write("="*50 + "\n\n")
         
-        for idx, article in enumerate(final_articles, 1):
+        for idx, article in enumerate(all_articles, 1):
             f.write(f"Article {idx}\n")
             f.write(f"Keyword: {article['keyword']}\n")
             f.write(f"Title: {article['title']}\n")
@@ -220,10 +185,8 @@ def run_search_process():
             f.write(f"Source: {article['source']}\n")
             f.write("-"*40 + "\n")
 
-    print(f"\n✅ Results saved to news_results.txt")
-    print(f"Tech website articles: {len(specific_articles)}")
-    print(f"General web articles: {len(general_articles)}")
-    print(f"Total unique articles: {len(final_articles)}")
+    print(f"\n✅ Results saved to data/news_results.txt")
+    print(f"Total unique articles: {len(all_articles)}")
     
     return True
 

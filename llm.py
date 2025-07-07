@@ -29,7 +29,7 @@ def get_gemini_client():
 # Remove this line that asks for user input:
 # news_number = int(input("How many news articles do you want to fetch? (default is 10): ") or 10)
 
-filepath = pathlib.Path('news_results.txt')
+filepath = pathlib.Path('data/news_results.txt')
 
 def extract_detailed_summary(url):
     """Extract summary from article URL using newspaper3k"""
@@ -244,8 +244,11 @@ Analyze the provided news collection and, if necessary, use Google Search to fin
         
         print(f"Selected {len(selected_articles)} articles for detailed analysis")
         
+        # Ensure data folder exists
+        os.makedirs("data", exist_ok=True)
+        
         # Save the curated results with detailed summaries
-        output_filename = f"curated_news_{news_number}_articles.txt"
+        output_filename = f"data/curated_news_{news_number}_articles.txt"
         with open(output_filename, "w", encoding="utf-8") as f:
             f.write("="*80 + "\n")
             f.write("EXPERT NEWS CURATION RESULTS\n")
@@ -339,7 +342,7 @@ Requirements:
         )
         
         # Save the formatted message version
-        message_filename = f"formatted_message_{news_number}_articles.txt"
+        message_filename = f"data/formatted_message_{news_number}_articles.txt"
         with open(message_filename, "w", encoding="utf-8") as f:
             f.write(formatted_response.text)
         
